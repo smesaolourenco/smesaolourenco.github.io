@@ -1,4 +1,4 @@
-<!-- SME-v2026-09-10b (Relatorio de nascimento sem coluna Escola) -->
+<!-- SME-v2026-09-10c (Planilha de datas de nascimento: baixar todos e subir preenchida) -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -109,6 +109,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-h
 .rel-vazio{text-align:center;color:#999;padding:18px;font-size:13px}
 .rel-bar{height:8px;background:#e6efe6;border-radius:4px;overflow:hidden}
 .rel-bar>div{height:100%;background:var(--g)}
+.rel-nasc-bt{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.rel-prev{border:1.5px solid var(--gp);background:#fbfdfb}
 /* CERT PREVIEW */
 .cpw{width:100%;aspect-ratio:1.414;background-color:#fff;background-size:cover;background-position:center;border:1px solid var(--bd);border-radius:8px;padding:4% 5% 3%;font-family:'Lora',Georgia,serif;position:relative;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,.1);margin-bottom:10px;display:flex;flex-direction:column}
 .cwm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:45%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,#e8f5e9,transparent 70%);opacity:.4;pointer-events:none}
@@ -369,6 +371,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-h
     </div>
     <div id="rel-body"></div>
     <input type="file" id="rel-rot-file" accept=".xlsx,.xls" style="display:none" onchange="relImportRoteiro(this)">
+    <input type="file" id="rel-nasc-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="relNascImport(this)">
   </div>
   <div id="pg-users" style="display:none">
     <div class="sh"><h2>&#128101; Gerenciar Usuários</h2>
@@ -808,7 +811,7 @@ function setTab(tab){
 }
 
 
-var SME_VERSION='SME-v2026-09-10b';
+var SME_VERSION='SME-v2026-09-10c';
 // ── SUPABASE CONFIG ────────────────────────────────────────────────────────────
 var SUPA_URL='https://jabgimlqhgsmaoncfaon.supabase.co';
 var SUPA_KEY='sb_publishable_pdd6Ur198pja2PCgXjrZvg_TkITQdpU';
@@ -6584,11 +6587,16 @@ function relBirthPanelHtml(){
   return '<div class="card">'+
     '<div class="rel-sec-hd"><h3>Datas de nascimento</h3><span class="rel-cnt">'+r.com+' de '+r.total+' professores preenchidos ('+pct+'%)</span></div>'+
     '<div class="rel-bar" role="progressbar" aria-valuenow="'+pct+'" aria-valuemin="0" aria-valuemax="100"><div style="width:'+pct+'%"></div></div>'+
+    '<div class="rel-nasc-bt">'+
+      '<button class="btn bp" onclick="relBirthExport(\'todos\')">&#128202; Baixar todos ('+r.total+')</button>'+
+      (r.sem?'<button class="btn bs" onclick="relBirthExport(\'faltam\')">&#128202; Baixar só os que faltam ('+r.sem+')</button>':'')+
+      '<button class="btn bs" onclick="relNascPedir()">&#128228; Subir planilha preenchida</button>'+
+    '</div>'+
+    (relNascPrev?relNascPrevHtml():'')+
     (r.sem
-      ?'<div class="rel-filtros" style="margin-top:14px"><input class="inp" id="rel-nasc-busca" placeholder="&#128269; Buscar por nome ou CPF..." value="'+_relAttr(relNascBusca)+'" oninput="relNascBusca=this.value;relRenderNascLista()">'+
-        '<button class="btn bp" onclick="relBirthExport()">&#128202; Baixar lista ('+r.sem+')</button></div>'+
+      ?'<div class="rel-filtros"><input class="inp" id="rel-nasc-busca" placeholder="&#128269; Buscar por nome ou CPF..." value="'+_relAttr(relNascBusca)+'" oninput="relNascBusca=this.value;relRenderNascLista()"></div>'+
         '<div class="rel-scroll" id="rel-nasc-lista"></div>'+
-        '<div class="rel-nota">A planilha sai com uma coluna de data em branco para preencher. Ao salvar a data em Editar, a lista se atualiza.</div>'
+        '<div class="rel-nota">Baixe a planilha, preencha só as datas que faltam e suba de volta. Na volta, só as datas em branco no sistema são preenchidas: nada do que já está gravado é alterado.</div>'
       :'<div class="rel-ok" style="margin-top:12px">&#9989; Todos os professores têm data de nascimento.</div>')+
   '</div>';
 }
@@ -6607,17 +6615,158 @@ function relRenderNascLista(){
         '<td style="text-align:right"><button class="btn bs btn-sm" onclick="openTchModal(\''+tid+'\')">&#9999;&#65039; Editar</button></td></tr>';
     }).join('')+'</tbody></table>';
 }
-function relBirthExport(){
+// A data sai como TEXTO DD/MM/AAAA: se fosse data do Excel, quem digitasse por
+// cima poderia gravar em formato americano sem perceber.
+function relBirthExport(modo){
   if(typeof XLSX==='undefined'){toast('A biblioteca do Excel não carregou. Recarregue a página.','e');return;}
-  var r=relTeachersBirth();
-  if(!r.sem){toast('Todos já têm data de nascimento.','i');return;}
+  var r=relTeachersBirth(), todos=(modo!=='faltam');
+  if(!todos&&!r.sem){toast('Todos já têm data de nascimento.','i');return;}
+  var base=todos?(S.teachers||[]).slice().sort(function(a,b){
+      try{return String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{sensitivity:'base'});}catch(e){return 0;}
+    }):r.lista;
+  if(!base.length){toast('Nenhum professor cadastrado.','i');return;}
   var aoa=[['Nome','CPF','Data de nascimento (DD/MM/AAAA)']];
-  r.lista.forEach(function(t){aoa.push([t.name||'',t.cpf?maskCPF(t.cpf):'','']);});
+  base.forEach(function(t){
+    var bd=String(t.birthDate||'').slice(0,10), br='';
+    if(/^\d{4}-\d{2}-\d{2}$/.test(bd)) br=bd.slice(8,10)+'/'+bd.slice(5,7)+'/'+bd.slice(0,4);
+    aoa.push([t.name||'',t.cpf?maskCPF(t.cpf):'',br]);
+  });
   var wb=XLSX.utils.book_new(), ws=XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols']=[{wch:42},{wch:16},{wch:22}];
-  XLSX.utils.book_append_sheet(wb,ws,'Sem data');
-  XLSX.writeFile(wb,'professores-sem-data-de-nascimento.xlsx');
-  toast('✅ Lista baixada ('+r.sem+' professores).');
+  for(var i=2;i<=aoa.length;i++){var c=ws['C'+i]; if(c){c.t='s';c.z='@';}}
+  XLSX.utils.book_append_sheet(wb,ws,todos?'Professores':'Sem data');
+  XLSX.writeFile(wb,todos?'professores-datas-de-nascimento.xlsx':'professores-sem-data-de-nascimento.xlsx');
+  toast('✅ Planilha baixada ('+base.length+' professor'+(base.length>1?'es':'')+').');
+}
+
+// ── Volta da planilha ─────────────────────────────────────────────────────────
+// Só PREENCHE data em branco. Data já gravada nunca é sobrescrita: divergência
+// vira aviso para você decidir em Editar.
+var relNascPrev=null;
+function relNascPedir(){var f=document.getElementById('rel-nasc-file');if(f){f.value='';f.click();}}
+function relNascCancelar(){relNascPrev=null;renderRelatorios();}
+function _relAnoOk(iso){
+  var a=parseInt(iso.slice(0,4),10), hoje=new Date().getFullYear();
+  return a>=1920&&a<=hoje-14;
+}
+function relNascImport(input){
+  var f=input.files&&input.files[0]; if(!f) return;
+  if(typeof XLSX==='undefined'){toast('A biblioteca do Excel não carregou. Recarregue a página.','e');input.value='';return;}
+  var r=new FileReader();
+  r.onload=function(e){
+    try{
+      var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true});
+      var res=null;
+      for(var i=0;i<wb.SheetNames.length&&!res;i++)
+        res=_relNascParse(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]],{header:1,raw:false,defval:'',cellDates:true}));
+      if(!res){toast('Não achei as colunas Nome e Data de nascimento na planilha.','e');return;}
+      res.arquivo=f.name; relNascPrev=res; renderRelatorios();
+      var box=document.getElementById('rel-nasc-prev'); if(box) box.scrollIntoView({block:'nearest'});
+    }catch(err){toast('Não consegui ler a planilha: '+err.message,'e');}
+    finally{input.value='';}
+  };
+  r.readAsArrayBuffer(f);
+}
+function _relNascParse(rows){
+  var hr=-1,cN=-1,cC=-1,cD=-1;
+  for(var i=0;i<Math.min(rows.length,30)&&hr<0;i++){
+    var n=-1,c=-1,d=-1;
+    (rows[i]||[]).forEach(function(v,j){
+      var t=encTextKey(v); if(!t) return;
+      if(n<0&&/^NOME/.test(t)) n=j;
+      else if(c<0&&/^CPF/.test(t)) c=j;
+      else if(d<0&&/NASCIMENTO|^DATA/.test(t)) d=j;
+    });
+    if(n>=0&&d>=0){hr=i;cN=n;cC=c;cD=d;}
+  }
+  if(hr<0) return null;
+  // Nome só resolve quando é único no cadastro: homônimo fica para conferência.
+  var porCpf={}, porNome={}, nomeDup={};
+  (S.teachers||[]).forEach(function(t){
+    var c=cpf11(t.cpf); if(c.length===11&&!porCpf[c]) porCpf[c]=t;
+    var n=normNome(t.name); if(!n) return;
+    if(porNome[n]) nomeDup[n]=true; else porNome[n]=t;
+  });
+  var R={preencher:[],iguais:0,diverg:[],naoAchou:[],invalidas:[],vazias:0,linhas:0};
+  for(var k=hr+1;k<rows.length;k++){
+    var row=rows[k]||[];
+    var nome=String(row[cN]==null?'':row[cN]).trim();
+    var cpfTxt=cC>=0?String(row[cC]==null?'':row[cC]).trim():'';
+    if(!nome&&!cpfTxt) continue;
+    R.linhas++;
+    var bruta=row[cD];
+    var iso=_dataNorm(bruta);
+    var cd=cpf11(cpfTxt);
+    var t=(cd.length===11&&porCpf[cd])||null;
+    if(!t){var nn=normNome(nome); if(nn&&porNome[nn]&&!nomeDup[nn]) t=porNome[nn];}
+    var reg={nome:nome,cpf:cpfTxt,data:String(bruta==null?'':bruta).trim(),iso:iso,t:t,linha:k+1};
+    if(!String(bruta==null?'':bruta).trim()){R.vazias++;continue;}
+    if(!iso||!_relAnoOk(iso)){R.invalidas.push(reg);continue;}
+    if(!t){R.naoAchou.push(reg);continue;}
+    var atual=String(t.birthDate||'').slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(atual)) R.preencher.push(reg);
+    else if(atual===iso) R.iguais++;
+    else {reg.atual=atual;R.diverg.push(reg);}
+  }
+  return R;
+}
+function _relBr(iso){return iso?iso.slice(8,10)+'/'+iso.slice(5,7)+'/'+iso.slice(0,4):'';}
+function relNascPrevHtml(){
+  var R=relNascPrev; if(!R) return '';
+  function bloco(tit,arr,cols){
+    if(!arr.length) return '';
+    return '<h4 class="rel-h4">'+tit+' ('+arr.length+')</h4><div class="rel-scroll" style="max-height:200px"><table class="rel-tbl"><thead><tr><th class="num">Linha</th><th>Nome</th><th>CPF</th>'+cols+'</tr></thead><tbody>'+
+      arr.map(function(x){
+        return '<tr class="rel-alerta"><td class="num">'+x.linha+'</td><td>'+esc(x.nome||'(sem nome)')+'</td><td style="white-space:nowrap">'+esc(x.cpf||'')+'</td>'+
+          '<td style="white-space:nowrap">'+esc(x.data)+'</td>'+(x.atual?'<td style="white-space:nowrap">'+_relBr(x.atual)+'</td>':(cols.indexOf('Já gravada')>=0?'<td></td>':''))+'</tr>';
+      }).join('')+'</tbody></table></div>';
+  }
+  var n=R.preencher.length;
+  return '<div class="card rel-prev" id="rel-nasc-prev">'+
+    '<div class="rel-sec-hd"><h3>Planilha lida</h3><span class="rel-cnt">'+esc(R.arquivo||'')+', '+R.linhas+' linha(s)</span></div>'+
+    '<ul class="rel-pend">'+
+      '<li><span class="rel-dot '+(n?'bl':'info')+'"></span><span>'+(n?n+' data(s) para preencher.':'Nenhuma data nova para preencher.')+'</span></li>'+
+      (R.iguais?'<li><span class="rel-dot info"></span><span>'+R.iguais+' já conferem com o sistema.</span></li>':'')+
+      (R.vazias?'<li><span class="rel-dot info"></span><span>'+R.vazias+' linha(s) ainda sem data na planilha.</span></li>':'')+
+      (R.diverg.length?'<li><span class="rel-dot am"></span><span>'+R.diverg.length+' data(s) diferentes da que já está gravada. Nada será alterado: confira uma a uma em Editar.</span></li>':'')+
+      (R.naoAchou.length?'<li><span class="rel-dot am"></span><span>'+R.naoAchou.length+' pessoa(s) da planilha não encontrada(s) no cadastro por CPF nem por nome.</span></li>':'')+
+      (R.invalidas.length?'<li><span class="rel-dot rd"></span><span>'+R.invalidas.length+' data(s) que não consegui entender ou fora do razoável.</span></li>':'')+
+    '</ul>'+
+    bloco('Diferentes da data já gravada',R.diverg,'<th>Na planilha</th><th>Já gravada</th>')+
+    bloco('Não encontradas no cadastro',R.naoAchou,'<th>Na planilha</th>')+
+    bloco('Datas que não entendi',R.invalidas,'<th>Na planilha</th>')+
+    '<div class="rel-nasc-bt" style="margin-top:14px">'+
+      (n?'<button class="btn bp" id="rel-nasc-aplicar" onclick="relNascAplicar()">&#9989; Preencher '+n+' data(s)</button>':'')+
+      '<button class="btn bg_" onclick="relNascCancelar()">Fechar</button>'+
+    '</div>'+
+  '</div>';
+}
+function relNascAplicar(){
+  var R=relNascPrev; if(!R||!R.preencher.length) return;
+  var bt=document.getElementById('rel-nasc-aplicar');
+  if(bt){bt.disabled=true;bt.textContent='Gravando...';}
+  var fila=R.preencher.slice(), ok=0, erro=0;
+  // De 5 em 5 para nao disparar centenas de gravacoes de uma vez.
+  function lote(){
+    if(!fila.length) return fim();
+    var bloco=fila.splice(0,5);
+    Promise.all(bloco.map(function(x){
+      var t=(S.teachers||[]).find(function(y){return String(y.id)===String(x.t.id);});
+      if(!t){erro++;return Promise.resolve();}
+      t.birthDate=x.iso;
+      // Registro completo: o upsert apaga o que nao for enviado.
+      return apiCall({action:'saveTeacher',data:t}).then(function(){ok++;}).catch(function(){erro++;});
+    })).then(function(){
+      if(bt) bt.textContent='Gravando... '+(ok+erro)+' de '+R.preencher.length;
+      lote();
+    });
+  }
+  function fim(){
+    relNascPrev=null; renderTeachers(); updateMeta();
+    if(curTab==='reports') renderRelatorios();
+    toast(erro?('Preenchidas '+ok+' data(s), '+erro+' com erro. Confira a conexão e suba de novo.'):('✅ '+ok+' data(s) preenchida(s).'),erro?'e':'s');
+  }
+  lote();
 }
 
 </script>
