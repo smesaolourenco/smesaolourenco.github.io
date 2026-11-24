@@ -1,0 +1,40 @@
+# Mantém o banco Supabase acordado.
+# O plano gratuito do Supabase pausa o projeto após 7 dias sem acesso.
+# Esta tarefa faz uma consulta leve ao banco a cada 3 dias.
+# A chave usada é a mesma chave pública que já está no portal.html.
+
+name: Manter banco acordado
+
+on:
+  schedule:
+    - cron: "0 12 */3 * *"   # a cada 3 dias, às 9h (horário de Brasília)
+  workflow_dispatch:          # permite rodar manualmente pelo botão "Run workflow"
+
+permissions:
+  actions: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar o banco
+        env:
+          SUPA_URL: https://jabgimlqhgsmaoncfaon.supabase.co
+          SUPA_KEY: sb_publishable_pdd6Ur198pja2PCgXjrZvg_TkITQdpU
+        run: |
+          status=$(curl -s -o resposta.txt -w "%{http_code}" -X POST "$SUPA_URL/rest/v1/rpc/portal_validar" \
+            -H "apikey: $SUPA_KEY" -H "Authorization: Bearer $SUPA_KEY" \
+            -H "Content-Type: application/json" -d '{"p_codigo":"TESTE-AUTOMATICO"}')
+          echo "Resposta do banco: $status"
+          cat resposta.txt; echo
+          if [ "$status" != "200" ]; then
+            echo "O banco não respondeu. Ele pode estar pausado: entre no painel do Supabase e clique em Restore."
+            exit 1
+          fi
+
+      # O GitHub desliga tarefas agendadas depois de 60 dias sem alterações no repositório.
+      # Este passo religa a própria tarefa a cada execução, para ela nunca parar.
+      - name: Manter a tarefa ligada
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/manter-banco-acordado.yml/enable"
